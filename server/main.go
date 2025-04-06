@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,15 +39,34 @@ func main() {
 	http.HandleFunc("/api/status", handleStatus)
 	http.HandleFunc("/api/nodes", handleGetNodes)
 	http.HandleFunc("/api/history", handleGetHistory)
-	http.Handle("/", http.FileServer(http.Dir("web")))
+
+	// 限制文件服务器的访问范围
+	fs := http.FileServer(http.Dir("web"))
+	http.Handle("/", http.StripPrefix("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 禁止访问敏感文件或目录
+		sensitivePaths := []string{"/server/", "/config/", "/.env"}
+		for _, sensitivePath := range sensitivePaths {
+			if strings.HasPrefix(r.URL.Path, sensitivePath) {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+		}
+		fs.ServeHTTP(w, r)
+	})))
 
 	// 启动清理过期数据的goroutine
 	go cleanupOldData()
 
-	// 启动服务器
+	// 启动服务器，增加安全配置
 	port := "23480"
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      nil,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
 	log.Printf("Server starting on port %s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -56,9 +77,19 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 限制请求体大小
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
+	defer r.Body.Close()
+
 	var status NodeStatus
 	if err := json.NewDecoder(r.Body).Decode(&status); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		return
+	}
+
+	// 验证输入数据
+	if !isValidNodeStatus(status) {
+		http.Error(w, "Invalid data", http.StatusBadRequest)
 		return
 	}
 
@@ -72,6 +103,34 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	mutex.Unlock()
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// 验证 NodeStatus 数据的完整性和合理性
+func isValidNodeStatus(status NodeStatus) bool {
+	if !isValidIPv4(status.NodeIP) || len(status.Connections) == 0 {
+		return false
+	}
+
+	for _, conn := range status.Connections {
+		if !isValidConnectionStatus(conn) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// 验证 ConnectionStatus 数据的完整性和合理性
+func isValidConnectionStatus(conn ConnectionStatus) bool {
+	if !isValidIPv4(conn.TargetIP) || conn.Latency < 0 || conn.PacketLoss < 0 || conn.PacketLoss > 100 {
+		return false
+	}
+	return true
+}
+
+// 验证是否为合法的 IPv4 地址
+func isValidIPv4(ip string) bool {
+	return net.ParseIP(ip) != nil && strings.Count(ip, ":") == 0
 }
 
 func handleGetNodes(w http.ResponseWriter, r *http.Request) {

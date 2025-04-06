@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -55,6 +56,10 @@ func main() {
 }
 
 func collectNodeStatus(nodeIP string) NodeStatus {
+	if !isValidIPv4(nodeIP) {
+		log.Fatalf("Invalid NodeIP format: %s", nodeIP)
+	}
+
 	status := NodeStatus{
 		NodeIP:      nodeIP,
 		Timestamp:   time.Now(),
@@ -64,7 +69,7 @@ func collectNodeStatus(nodeIP string) NodeStatus {
 	// 测试与其他节点的连接
 	for i := 1; i <= 10; i++ {
 		targetIP := fmt.Sprintf("10.0.0.%d", i)
-		if targetIP == nodeIP {
+		if targetIP == nodeIP || !isValidIPv4(targetIP) {
 			continue
 		}
 
@@ -78,6 +83,11 @@ func collectNodeStatus(nodeIP string) NodeStatus {
 	}
 
 	return status
+}
+
+// 验证是否为合法的 IPv4 地址
+func isValidIPv4(ip string) bool {
+	return net.ParseIP(ip) != nil && strings.Count(ip, ":") == 0
 }
 
 func testConnection(targetIP string) (float64, float64, bool) {
