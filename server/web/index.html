@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="zh">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Mesh Network Monitor</title>
+        <script src="https://d3js.org/d3.v7.min.js"></script>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            :root {
+                --primary-color: #2196f3;
+                --secondary-color: #4caf50;
+                --warning-color: #ffc107;
+                --danger-color: #f44336;
+                --background-color: #f5f7fa;
+                --card-background: #ffffff;
+                --text-color: #333333;
+                --border-color: #e0e0e0;
+            }
+
+            body {
+                font-family: "Roboto", sans-serif;
+                margin: 0;
+                padding: 10px;
+                background-color: var(--background-color);
+                color: var(--text-color);
+            }
+
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+            }
+
+            .header {
+                background-color: var(--card-background);
+                padding: 10px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                margin-bottom: 10px;
+            }
+
+            .header h1 {
+                margin: 0;
+                color: var(--primary-color);
+                font-size: 1.5em;
+            }
+
+            .network-container {
+                background-color: var(--card-background);
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                padding: 10px;
+                margin-bottom: 10px;
+            }
+
+            .network-graph {
+                height: 400px;
+                border-radius: 8px;
+                overflow: hidden;
+                background-color: #f8f9fa;
+            }
+
+            .node-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+                gap: 10px;
+            }
+
+            .node-card {
+                background-color: var(--card-background);
+                border-radius: 8px;
+                padding: 10px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            }
+
+            .node-card h3 {
+                margin: 0 0 5px 0;
+                color: var(--primary-color);
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                font-size: 1em;
+            }
+
+            .connection {
+                margin-top: 5px;
+                padding: 5px;
+                border-radius: 4px;
+                background-color: var(--background-color);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .connection-info {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .connection-status {
+                display: flex;
+                align-items: center;
+                gap: 2px;
+            }
+
+            .status-indicator {
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+            }
+
+            .status-connected {
+                background-color: var(--secondary-color);
+            }
+
+            .status-disconnected {
+                background-color: var(--danger-color);
+            }
+
+            .latency-indicator {
+                padding: 3px 6px;
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: 500;
+            }
+
+            .latency-good {
+                background-color: rgba(76, 175, 80, 0.1);
+                color: var(--secondary-color);
+            }
+
+            .latency-warning {
+                background-color: rgba(255, 193, 7, 0.1);
+                color: var(--warning-color);
+            }
+
+            .latency-bad {
+                background-color: rgba(244, 67, 54, 0.1);
+                color: var(--danger-color);
+            }
+
+            .tooltip {
+                position: absolute;
+                text-align: center;
+                width: 100px;
+                height: auto;
+                padding: 4px;
+                font: 10px sans-serif;
+                background: lightsteelblue;
+                border: 0px;
+                border-radius: 6px;
+                pointer-events: none;
+            }
+
+            .target-squares {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 3px;
+                margin-top: 5px;
+            }
+
+            .target-square {
+                width: 15px;
+                height: 15px;
+                border-radius: 3px;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Mesh Network Monitor</h1>
+            </div>
+
+            <div class="network-container">
+                <h2>网络拓扑图</h2>
+                <div id="networkGraph" class="network-graph"></div>
+            </div>
+
+            <div class="node-grid" id="nodeGrid"></div>
+        </div>
+
+        <script>
+            let tooltip;
+
+            function updateNodes() {
+                fetch("/api/nodes")
+                    .then((response) => response.json())
+                    .then((data) => {
+                        updateNodeGrid(data);
+                        updateNetworkGraph(data);
+                    })
+                    .catch((error) =>
+                        console.error("Error fetching nodes:", error),
+                    );
+            }
+
+            function updateNodeGrid(data) {
+                const nodeGrid = document.getElementById("nodeGrid");
+                nodeGrid.innerHTML = "";
+
+                Object.values(data).forEach((node) => {
+                    const nodeCard = document.createElement("div");
+                    nodeCard.className = "node-card";
+
+                    // 计算平均延迟
+                    const avgLatency =
+                        node.connections.reduce(
+                            (sum, conn) => sum + conn.latency,
+                            0,
+                        ) / node.connections.length;
+                    const latencyClass = getLatencyClass(avgLatency);
+
+                    nodeCard.innerHTML = `
+                    <h3>
+                        <span class="status-indicator ${node.connections.some((c) => !c.isConnected) ? "status-disconnected" : "status-connected"}"></span>
+                        节点: ${node.node_ip}
+                        <span class="latency-indicator ${latencyClass}">平均延迟: ${avgLatency.toFixed(0)}ms</span>
+                    </h3>
+                    <p>最后更新: ${new Date(node.timestamp).toLocaleString()}</p>
+                    <div class="target-squares">
+                        ${node.connections
+                            .map(
+                                (conn) => `
+                                <div
+                                    class="target-square"
+                                    style="background-color: ${getLatencyColor(conn.latency)};"
+                                    title="目标: ${conn.target_ip}, 延迟: ${conn.latency.toFixed(0)}ms, 丢包率: ${conn.packet_loss.toFixed(2)}%"
+                                    onmouseover="showTargetTooltip(event, '${conn.target_ip}', ${conn.latency.toFixed(0)}, ${conn.packet_loss.toFixed(2)})"
+                                    onmouseout="hideTargetTooltip()"
+                                ></div>
+                                `,
+                            )
+                            .join("")}
+                    </div>
+                `;
+                    nodeGrid.appendChild(nodeCard);
+                });
+            }
+
+            function updateNetworkGraph(data) {
+                const width = 600;
+                const height = 400;
+                const svg = d3
+                    .select("#networkGraph")
+                    .append("svg")
+                    .attr("width", width)
+                    .attr("height", height);
+
+                const nodes = Object.keys(data).map((ip) => ({ id: ip }));
+                const links = [];
+
+                Object.values(data).forEach((node) => {
+                    node.connections.forEach((conn) => {
+                        if (conn.is_connected) {
+                            links.push({
+                                source: node.node_ip,
+                                target: conn.target_ip,
+                                latency: conn.latency,
+                            });
+                        }
+                    });
+                });
+
+                const simulation = d3
+                    .forceSimulation(nodes)
+                    .force(
+                        "link",
+                        d3
+                            .forceLink(links)
+                            .id((d) => d.id)
+                            .distance(80),
+                    )
+                    .force("charge", d3.forceManyBody().strength(-200))
+                    .force("center", d3.forceCenter(width / 2, height / 2));
+
+                const colorScale = d3
+                    .scaleLinear()
+                    .domain([0, 100, 200, 500])
+                    .range(["green", "yellow", "orange", "red"]);
+
+                const link = svg
+                    .append("g")
+                    .attr("stroke-opacity", 0.8)
+                    .selectAll("line")
+                    .data(links)
+                    .join("line")
+                    .attr("stroke-width", 2)
+                    .attr("stroke", (d) => colorScale(d.latency));
+
+                const node = svg
+                    .append("g")
+                    .attr("stroke", "#fff")
+                    .attr("stroke-width", 1.5)
+                    .selectAll("circle")
+                    .data(nodes)
+                    .join("circle")
+                    .attr("r", 6)
+                    .attr("fill", "#69b3a2")
+                    .call(drag(simulation));
+
+                tooltip = d3
+                    .select("body")
+                    .append("div")
+                    .attr("class", "tooltip")
+                    .style("opacity", 0);
+
+                node.on("mouseover", (event, d) => {
+                    tooltip.transition().duration(200).style("opacity", 0.9);
+                    tooltip
+                        .html(`节点: ${d.id}`)
+                        .style("left", event.pageX + 5 + "px")
+                        .style("top", event.pageY - 28 + "px");
+                }).on("mouseout", () => {
+                    tooltip.transition().duration(500).style("opacity", 0);
+                });
+
+                node.append("title").text((d) => d.id);
+
+                simulation.on("tick", () => {
+                    link.attr("x1", (d) => d.source.x)
+                        .attr("y1", (d) => d.source.y)
+                        .attr("x2", (d) => d.target.x)
+                        .attr("y2", (d) => d.target.y);
+
+                    node.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
+                });
+
+                function drag(simulation) {
+                    function dragstarted(event, d) {
+                        if (!event.active)
+                            simulation.alphaTarget(0.3).restart();
+                        d.fx = d.x;
+                        d.fy = d.y;
+                    }
+
+                    function dragged(event, d) {
+                        d.fx = event.x;
+                        d.fy = d.y;
+                    }
+
+                    function dragended(event, d) {
+                        if (!event.active) simulation.alphaTarget(0);
+                        d.fx = null;
+                        d.fy = null;
+                    }
+
+                    return d3
+                        .drag()
+                        .on("start", dragstarted)
+                        .on("drag", dragged)
+                        .on("end", dragended);
+                }
+            }
+
+            function getLatencyClass(latency) {
+                if (latency < 50) return "latency-good";
+                if (latency < 100) return "latency-warning";
+                return "latency-bad";
+            }
+
+            function getLatencyColor(latency) {
+                if (latency < 50) return "green";
+                if (latency < 100) return "yellow";
+                if (latency < 200) return "orange";
+                return "red";
+            }
+
+            function showTargetTooltip(event, targetIp, latency, packetLoss) {
+                tooltip.transition().duration(200).style("opacity", 0.9);
+                tooltip
+                    .html(
+                        `目标: ${targetIp}<br/>延迟: ${latency}ms<br/>丢包率: ${packetLoss}%`,
+                    )
+                    .style("left", event.pageX + 5 + "px")
+                    .style("top", event.pageY - 28 + "px");
+            }
+
+            function hideTargetTooltip() {
+                tooltip.transition().duration(500).style("opacity", 0);
+            }
+
+            // 每30秒更新一次数据
+            setInterval(updateNodes, 30000);
+            updateNodes(); // 初始加载
+        </script>
+    </body>
+</html>

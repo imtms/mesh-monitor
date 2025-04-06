@@ -1,0 +1,35 @@
+---
+- name: Deploy Mesh Monitor Client
+  hosts: all
+  become: yes
+  vars:
+    server_url: "http://10.0.0.1:23480" # 替换为实际的服务器地址
+
+  tasks:
+    - name: Create application directory
+      file:
+        path: /opt/mesh-monitor
+        state: directory
+        mode: "0755"
+
+    - name: Copy client binary
+      copy:
+        src: ../client/mesh-monitor-client
+        dest: /opt/mesh-monitor/mesh-monitor-client
+        mode: "0755"
+
+    - name: Create systemd service
+      template:
+        src: mesh-monitor.service.j2
+        dest: /etc/systemd/system/mesh-monitor.service
+        mode: "0644"
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Start and enable mesh-monitor service
+      systemd:
+        name: mesh-monitor
+        state: restarted
+        enabled: yes

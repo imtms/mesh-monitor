@@ -1,0 +1,15 @@
+[Unit]
+Description=Mesh Network Monitor Client
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Environment=NODE_IP={{ inventory_hostname }}
+Environment=SERVER_URL={{ server_url }}
+ExecStart=/opt/mesh-monitor/mesh-monitor-client
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target 
