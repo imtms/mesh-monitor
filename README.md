@@ -2,8 +2,6 @@
 
 ![Mesh Network Monitor](./pic.png)
 
-Demo: [https://mesh.tms.im](https://mesh.tms.im)
-
 This project provides a simple mesh network monitoring solution, consisting of a server and client application. The client collects network status information (latency, packet loss, connection status) and sends it to the server. The server aggregates this data and provides a web interface for visualization.
 
 ## Features
